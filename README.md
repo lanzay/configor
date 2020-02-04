@@ -1,6 +1,8 @@
 # Configor
 
-Golang Configuration tool that support YAML, JSON, TOML, Shell Environment
+Golang Configuration tool that support YAML, JSON, TOML, Shell Environment (Supports Go 1.10+)
+
+[![wercker status](https://app.wercker.com/status/9ebd3684ff8998501af5aac38a79a380/s/master "wercker status")](https://app.wercker.com/project/byKey/9ebd3684ff8998501af5aac38a79a380)
 
 ## Usage
 
@@ -62,6 +64,26 @@ configor.New(&configor.Config{Debug: true}).Load(&Config, "config.json")
 configor.New(&configor.Config{Verbose: true}).Load(&Config, "config.json")
 ```
 
+## Auto Reload Mode
+
+Configor can auto reload configuration based on time
+
+```go
+// auto reload configuration every second
+configor.New(&configor.Config{AutoReload: true}).Load(&Config, "config.json")
+
+// auto reload configuration every minute
+configor.New(&configor.Config{AutoReload: true, AutoReloadInterval: time.Minute}).Load(&Config, "config.json")
+```
+
+Auto Reload Callback
+
+```go
+configor.New(&configor.Config{AutoReload: true, AutoReloadCallback: func(config interface{}) {
+    fmt.Printf("%v changed", config)
+}}).Load(&Config, "config.json")
+```
+
 # Advanced Usage
 
 * Load mutiple configurations
@@ -69,6 +91,18 @@ configor.New(&configor.Config{Verbose: true}).Load(&Config, "config.json")
 ```go
 // Earlier configurations have higher priority
 configor.Load(&Config, "application.yml", "database.json")
+```
+
+* Return error on unmatched keys
+
+Return an error on finding keys in the config file that do not match any fields in the config struct.
+In the example below, an error will be returned if config.toml contains keys that do not match any fields in the ConfigStruct struct.
+If ErrorOnUnmatchedKeys is not set, it defaults to false.
+
+Note that for json files, setting ErrorOnUnmatchedKeys to true will have an effect only if using go 1.10 or later.
+
+```go
+err := configor.New(&configor.Config{ErrorOnUnmatchedKeys: true}).Load(&ConfigStruct, "config.toml")
 ```
 
 * Load configuration by environment
@@ -161,10 +195,9 @@ func main() {
 }
 ```
 
-## Supporting the project
+## Contributing
 
-[![http://patreon.com/jinzhu](http://patreon_public_assets.s3.amazonaws.com/sized/becomeAPatronBanner.png)](http://patreon.com/jinzhu)
-
+You can help to make the project better, check out [http://gorm.io/contribute.html](http://gorm.io/contribute.html) for things you can do.
 
 ## Author
 

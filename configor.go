@@ -3,18 +3,30 @@ package configor
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
+	"time"
 )
 
 type Configor struct {
 	*Config
+	configModTimes map[string]time.Time
 }
 
 type Config struct {
-	Environment string
-	ENVPrefix   string
-	Debug       bool
-	Verbose     bool
+	Environment        string
+	ENVPrefix          string
+	Debug              bool
+	Verbose            bool
+	Silent             bool
+	AutoReload         bool
+	AutoReloadInterval time.Duration
+	AutoReloadCallback func(config interface{})
+
+	// In case of json files, this field will be used only when compiled with
+	// go 1.10 or later.
+	// This field will be ignored when compiled with go versions lower than 1.10.
+	ErrorOnUnmatchedKeys bool
 }
 
 // New initialize a Configor
@@ -31,8 +43,18 @@ func New(config *Config) *Configor {
 		config.Verbose = true
 	}
 
+	if os.Getenv("CONFIGOR_SILENT_MODE") != "" {
+		config.Silent = true
+	}
+
+	if config.AutoReload && config.AutoReloadInterval == 0 {
+		config.AutoReloadInterval = time.Second
+	}
+
 	return &Configor{Config: config}
 }
+
+var testRegexp = regexp.MustCompile("_test|(\\.test$)")
 
 // GetEnvironment get environment
 func (configor *Configor) GetEnvironment() string {
@@ -41,7 +63,7 @@ func (configor *Configor) GetEnvironment() string {
 			return env
 		}
 
-		if isTest, _ := regexp.MatchString("/_test/", os.Args[0]); isTest {
+		if testRegexp.MatchString(os.Args[0]) {
 			return "test"
 		}
 
@@ -50,28 +72,42 @@ func (configor *Configor) GetEnvironment() string {
 	return configor.Environment
 }
 
+// GetErrorOnUnmatchedKeys returns a boolean indicating if an error should be
+// thrown if there are keys in the config file that do not correspond to the
+// config struct
+func (configor *Configor) GetErrorOnUnmatchedKeys() bool {
+	return configor.ErrorOnUnmatchedKeys
+}
+
 // Load will unmarshal configurations to struct from files that you provide
-func (configor *Configor) Load(config interface{}, files ...string) error {
-	defer func() {
-		if configor.Config.Debug || configor.Config.Verbose {
-			fmt.Printf("Configuration:\n  %#v\n", config)
-		}
-	}()
-
-	for _, file := range configor.getConfigurationFiles(files...) {
-		if configor.Config.Debug || configor.Config.Verbose {
-			fmt.Printf("Loading configurations from file '%v'...\n", file)
-		}
-		if err := processFile(config, file); err != nil {
-			return err
-		}
+func (configor *Configor) Load(config interface{}, files ...string) (err error) {
+	defaultValue := reflect.Indirect(reflect.ValueOf(config))
+	if !defaultValue.CanAddr() {
+		return fmt.Errorf("Config %v should be addressable", config)
 	}
+	err, _ = configor.load(config, false, files...)
 
-	prefix := configor.getENVPrefix(config)
-	if prefix == "-" {
-		return configor.processTags(config)
+	if configor.Config.AutoReload {
+		go func() {
+			timer := time.NewTimer(configor.Config.AutoReloadInterval)
+			for range timer.C {
+				reflectPtr := reflect.New(reflect.ValueOf(config).Elem().Type())
+				reflectPtr.Elem().Set(defaultValue)
+
+				var changed bool
+				if err, changed = configor.load(reflectPtr.Interface(), true, files...); err == nil && changed {
+					reflect.ValueOf(config).Elem().Set(reflectPtr.Elem())
+					if configor.Config.AutoReloadCallback != nil {
+						configor.Config.AutoReloadCallback(config)
+					}
+				} else if err != nil {
+					fmt.Printf("Failed to reload configuration from %v, got error %v\n", files, err)
+				}
+				timer.Reset(configor.Config.AutoReloadInterval)
+			}
+		}()
 	}
-	return configor.processTags(config, prefix)
+	return
 }
 
 // ENV return environment
